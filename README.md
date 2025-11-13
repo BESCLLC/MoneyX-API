@@ -1,28 +1,49 @@
-📘 MoneyX Derivatives Exchange API Documentation
+📘 MoneyX Derivatives Exchange — Public API Documentation
 
 Version 1.0
+For CoinGecko, GeckoTerminal & CoinMarketCap integration
 
-Public API for CoinGecko, GeckoTerminal, and CoinMarketCap integration.
+📄 Public API Docs
+https://github.com/BESCLLC/MoneyX-API/edit/main/README.md
+
+Stats Url
+https://stats.moneyxpro.com
 
 
-# 📌 Overview
+🔗 API Endpoints (Quick Links)
 
-This API provides price, contract specifications, synthetic orderbooks, and supply data for MoneyX, a decentralized perpetuals exchange deployed on Binance Smart Chain (BSC).
+Contracts
+https://api.moneyxpro.com/contracts
+
+Contract Specs
+https://api.moneyxpro.com/contract_specs
+
+Orderbook (example)
+https://api.moneyxpro.com/orderbook?ticker_id=BTC-PERP
+
+Supply (MONEY)
+https://api.moneyxpro.com/supply/money
+
+Healthcheck
+https://api.moneyxpro.com/health
+
+
+📌 Overview
+
+MoneyX is a decentralized derivatives (perpetual futures) exchange deployed on BNB Smart Chain.
+This API is built specifically to meet the official CoinGecko and CoinMarketCap Derivatives Exchange specifications.
 
 This API is:
-	•	Completely public
-	•	No authentication required
-	•	Updated in real time from on-chain data
-	•	Compliant with CoinGecko & CoinMarketCap requirements
-
-Base URL:
-
-https://api.moneyxpro.com
+	•	🔓 Completely public
+	•	🔑 No authentication required
+	•	⚡ Updated live from on-chain price feeds
+	•	✔️ Fully compliant with CG/CMC formatting requirements
+	•	📡 Hosted at: https://api.moneyxpro.com
 
 
-# 📈 Supported Perpetual Markets
+📈 Supported Perpetual Markets
 
-Market	Contract
+Market	Ticker
 BTC/USD	BTC-PERP
 ETH/USD	ETH-PERP
 BNB/USD	BNB-PERP
@@ -31,15 +52,14 @@ DOGE/USD	DOGE-PERP
 XRP/USD	XRP-PERP
 
 
-# 🔵 1. /contracts
+🔵 1. GET /contracts
 
-Returns full derivative contract data for all perpetual markets.
+Returns full derivative contract data for all markets.
 
-Endpoint
+Endpoint:
+GET https://api.moneyxpro.com/contracts
 
-GET /contracts
-
-Response Example
+Response Example:
 
 [
   {
@@ -70,18 +90,17 @@ Response Example
   }
 ]
 
-All fields comply with CoinGecko Derivatives Exchange Specifications.
+✔️ All mandatory fields included
+✔️ Perfect match to CG Derivatives Standard
 
+🔵 2. GET /contract_specs
 
-# 🔵 2. /contract_specs
+Contract-level metadata (type, pricing model, currency).
 
-Provides contract-level metadata (type, pricing model).
+Endpoint:
+GET https://api.moneyxpro.com/contract_specs
 
-Endpoint
-
-GET /contract_specs
-
-Response Example
+Response Example:
 
 {
   "BTC-PERP": {
@@ -92,16 +111,14 @@ Response Example
 }
 
 
-# 🔵 3. /orderbook?ticker_id=XYZ-PERP
+🔵 3. GET /orderbook?ticker_id=XYZ-PERP
 
-Returns 50 bid and 50 ask levels (required depth for CG/CMC).
-MoneyX uses AMM pricing, so this is a synthetic orderbook (standard for GMX/MUX/Drift).
+Required 50/50 synthetic orderbook.
 
-Example
+Example:
+GET https://api.moneyxpro.com/orderbook?ticker_id=BTC-PERP
 
-GET /orderbook?ticker_id=BTC-PERP
-
-Response Sample
+Response:
 
 {
   "ticker_id": "BTC-PERP",
@@ -110,16 +127,19 @@ Response Sample
   "asks": [[103501, 1.0], [103502, 1.0], ...]
 }
 
+✔️ 50 bids and 50 asks
+✔️ Required timestamp included
+✔️ Standard format used across GMX/MUX/Drift integrations
 
-# 🔵 4. /supply/money
 
-Required by CG + CMC for circulating supply tracking.
+🔵 4. GET /supply/money
 
-Endpoint
+Required for circulating supply tracking.
 
-GET /supply/money
+Endpoint:
+GET https://api.moneyxpro.com/supply/money
 
-Response
+Response Example:
 
 {
   "total_supply": "1000000000000000000000000",
@@ -128,15 +148,14 @@ Response
 }
 
 
-# 🔵 5. /health
+🔵 5. GET /health
 
-Health check endpoint (recommended by CMC reviewers).
+Health check endpoint.
 
-Endpoint
+Endpoint:
+GET https://api.moneyxpro.com/health
 
-GET /health
-
-Response
+Response:
 
 {
   "status": "ok",
@@ -144,21 +163,32 @@ Response
 }
 
 
-# ⚙️ Technical Details
+🛠 Technical Details
+	•	Network: Binance Smart Chain (BSC Mainnet)
+	•	Price Source:
+VaultPriceFeed.getPrimaryPrice() — 30-decimal oracle pricing
+	•	Orderbook: Synthetic AMM-based depth
+	•	Uptime: 24/7 (Railway hosting)
+	•	No Cloudflare blocking — compatible with CoinGecko polling
+	•	Polling frequency tested: 30s, 1m, 5m, 30m
 
-Blockchain
-	•	Network: BSC Mainnet
-	•	Price Source: On-chain getLatestPrimaryPrice() from VaultPriceFeed
-	•	Token Prices: 30 decimals (1e30) converted to USD
-	•	No Cloudflare blocking
 
-Contact
+📌 Reviewer Notes
+
+Please read before evaluating:
+	•	MoneyX is a derivatives-only AMM-based perpetuals exchange (GMX-style).
+	•	Orderbooks are synthetic, which is standard for perpetual AMM DEXs.
+	•	All mandatory fields from CG Derivatives API Standard (2024) are implemented.
+	•	All endpoints are public, no-rate-limit, no-auth.
+	•	Supply endpoint supports 30-minute polling without restriction.
+
+
+📨 Contact
 
 support@moneyxpro.com
 
-⸻
 
-# 📌 API Usage Terms
-	•	Public and free to use
-	•	No guarantees on uptime
-	•	Intended for market data and tracking
+📜 API Usage Terms
+	•	Free and public
+	•	No uptime guarantees
+	•	Intended for market tracking and analytics
