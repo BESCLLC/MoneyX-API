@@ -34,12 +34,12 @@ const money = new ethers.Contract(ADDR.MONEY, ERC20ABI, provider);
 
 // Markets
 const MARKETS = [
-  { id: "BTC-PERP", token: "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c", base: "BTC" },
-  { id: "ETH-PERP", token: "0x2170Ed0880ac9A755fd29B2688956BD959F933F8", base: "ETH" },
-  { id: "BNB-PERP", token: "0xB8c77482e45F1F44De1745F52C74426C631bdd52", base: "BNB" },
-  { id: "SOL-PERP", token: "0x570A5d02638F9E7b20dfE31aA15d1d0505AFcD6f", base: "SOL" },
-  { id: "DOGE-PERP", token: "0xbA2aE424d960c26247Dd6c32edC70B295c744C43", base: "DOGE" },
-  { id: "XRP-PERP", token: "0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE", base: "XRP" }
+  { id: "BTC-PERP", token: "0x7130d2a12b9cbfae4f2634d864a1ee1ce3ead9c", base: "BTC" },
+  { id: "ETH-PERP", token: "0x2170ed0880ac9a755fd29b2688956bd959f933f8", base: "ETH" },
+  { id: "BNB-PERP", token: "0xb8c77482e45f1f44de1745f52c74426c631bdd52", base: "BNB" },
+  { id: "SOL-PERP", token: "0x570a5d02638f9e7b20dfe31aa15d1d0505afcd6f", base: "SOL" },
+  { id: "DOGE-PERP", token: "0xba2ae424d960c26247dd6c32edc70b295c744c43", base: "DOGE" },
+  { id: "XRP-PERP", token: "0x1d2f0da169ceb9fc7b3144628db156f3f6c60dbe", base: "XRP" }
 ];
 
 // Synthetic orderbook
