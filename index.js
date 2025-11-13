@@ -4,135 +4,59 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
-// ----------------------------------------------
-// Module path fix
-// ----------------------------------------------
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ----------------------------------------------
-// ABI loading (no warnings)
-// ----------------------------------------------
+// Load ABIs
 const PriceFeedABI = JSON.parse(fs.readFileSync(path.join(__dirname, "abi/VaultPriceFeed.json")));
 const ERC20ABI = JSON.parse(fs.readFileSync(path.join(__dirname, "abi/ERC20.json")));
 
-// ----------------------------------------------
-// Express
-// ----------------------------------------------
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 8080;
 
-// ----------------------------------------------
-// RPC
-// ----------------------------------------------
+// BSC RPC
 const provider = new ethers.JsonRpcProvider("https://bsc-dataseed1.binance.org");
 
-// ----------------------------------------------
-// Contract addresses (lowercase recommended)
-// ----------------------------------------------
+// Contract addresses
 const ADDR = {
-  PRICE_FEED: "0x31086dba211d1e66f51701535ad4c0e0f98a3482",
-  MONEY:      "0x4ffe5ec4d8b9822e01c9e49678884baec17f60d9",
+  PRICE_FEED: "0x31086dBa211D1e66F51701535AD4C0e0f98A3482",
+  MONEY:      "0x4fFe5ec4D8B9822e01c9E49678884bAEc17F60D9",
 };
 
-// ----------------------------------------------
-// Contract instances
-// ----------------------------------------------
 const priceFeed = new ethers.Contract(ADDR.PRICE_FEED, PriceFeedABI, provider);
-const money     = new ethers.Contract(ADDR.MONEY, ERC20ABI, provider);
+const money = new ethers.Contract(ADDR.MONEY, ERC20ABI, provider);
 
-// ----------------------------------------------
-// MARKETS array (filled dynamically)
-// ----------------------------------------------
-let MARKETS = [];
+// Market mapping
+const MARKETS = [
+  { id: "BTC-PERP", token: "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c", base: "BTC" },
+  { id: "ETH-PERP", token: "0x2170Ed0880ac9A755fd29B2688956BD959F933F8", base: "ETH" },
+  { id: "BNB-PERP", token: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c", base: "BNB" },
+  { id: "SOL-PERP", token: "0x570A5D26f7765Ecb712C0924E4De545B89fD43dF", base: "SOL" },
+  { id: "DOGE-PERP", token: "0xbA2aE424d960c26247Dd6c32edC70B295c744C43", base: "DOGE" },
+  { id: "XRP-PERP", token: "0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE", base: "XRP" },
+];
 
-// ----------------------------------------------
-// SAFE PRICE READER — NEVER FAILS
-// ----------------------------------------------
-async function getSafePrice(token) {
-  try {
-    const p = await priceFeed.getLatestPrimaryPrice(token);
-    if (p > 0n) return Number(p) / 1e30;
-  } catch {}
-
-  try {
-    const p = await priceFeed.getPrimaryPrice(token, false);
-    if (p > 0n) return Number(p) / 1e30;
-  } catch {}
-
-  try {
-    const p = await priceFeed.getPriceV2(token, false, false);
-    if (p > 0n) return Number(p) / 1e30;
-  } catch {}
-
-  try {
-    const p = await priceFeed.getPriceV1(token, false, false);
-    if (p > 0n) return Number(p) / 1e30;
-  } catch {}
-
-  try {
-    const p = await priceFeed.getPrice(token, false, false, false);
-    if (p > 0n) return Number(p) / 1e30;
-  } catch {}
-
-  return 0;
-}
-
-// ----------------------------------------------
-// Load actual feed tokens from contract
-// ----------------------------------------------
-async function initMarkets() {
-  let BTC = "", ETH = "", BNB = "";
-
-  try { BTC = (await priceFeed.btc()).toLowerCase(); } catch {}
-  try { ETH = (await priceFeed.eth()).toLowerCase(); } catch {}
-  try { BNB = (await priceFeed.bnb()).toLowerCase(); } catch {}
-
-  console.log("Loaded feed tokens:", { BTC, ETH, BNB });
-
-  MARKETS = [
-    { id: "BTC-PERP", token: BTC, base: "BTC" },
-    { id: "ETH-PERP", token: ETH, base: "ETH" },
-    { id: "BNB-PERP", token: BNB, base: "BNB" },
-
-    // These can stay as-is (these feeds usually exist in VaultPriceFeed)
-    { id: "SOL-PERP",  token: "0x570a5d02638f9e7b20dfe31aa15d1d0505afcd6f", base: "SOL" },
-    { id: "DOGE-PERP", token: "0xba2ae424d960c26247dd6c32edc70b295c744c43", base: "DOGE" },
-    { id: "XRP-PERP",  token: "0x1d2f0da169ceb9fc7b3144628db156f3f6c60dbe", base: "XRP" }
-  ];
-}
-
-// ----------------------------------------------
-// Synthetic Orderbook Generator
-// ----------------------------------------------
-function makeSyntheticOB(price) {
+// Generate synthetic orderbook
+function makeOB(price) {
   const bids = [], asks = [];
   for (let i = 1; i <= 50; i++) {
-    bids.push([price - i, 1.0]);
-    asks.push([price + i, 1.0]);
+    bids.push([price - i, 1]);
+    asks.push([price + i, 1]);
   }
   return { bids, asks };
 }
 
-// ----------------------------------------------
-// /health
-// ----------------------------------------------
-app.get("/health", (req, res) => {
-  res.json({ status: "ok", timestamp: Date.now() });
-});
-
-// ----------------------------------------------
-// /contracts
-// ----------------------------------------------
+// GET CONTRACTS
 app.get("/contracts", async (req, res) => {
   try {
     const now = Math.floor(Date.now() / 1000);
-    const output = [];
+    const out = [];
 
     for (const m of MARKETS) {
-      const price = await getSafePrice(m.token);
+      const p = await priceFeed.getPrimaryPrice(m.token, false);
+      const price = Number(p) / 1e30;
 
-      output.push({
+      out.push({
         ticker_id: m.id,
         base_currency: m.base,
         target_currency: "USD",
@@ -160,56 +84,44 @@ app.get("/contracts", async (req, res) => {
       });
     }
 
-    res.json(output);
+    res.json(out);
   } catch (e) {
-    console.log("contracts error:", e);
     res.status(500).json({ error: e.toString() });
   }
 });
 
-// ----------------------------------------------
-// /contract_specs
-// ----------------------------------------------
+// CONTRACT SPECS
 app.get("/contract_specs", (req, res) => {
-  const specs = {};
+  let out = {};
   for (const m of MARKETS) {
-    specs[m.id] = {
+    out[m.id] = {
       contract_type: "vanilla",
       contract_price_currency: "USD",
       contract_price: null
     };
   }
-  res.json(specs);
+  res.json(out);
 });
 
-// ----------------------------------------------
-// /orderbook
-// ----------------------------------------------
+// ORDERBOOK
 app.get("/orderbook", async (req, res) => {
   const id = req.query.ticker_id;
+  const m = MARKETS.find(x => x.id === id);
+  if (!m) return res.status(400).json({ error: "Unknown ticker_id" });
 
-  const market = MARKETS.find(x => x.id === id);
-  if (!market) return res.status(400).json({ error: "Unknown ticker_id" });
+  const p = await priceFeed.getPrimaryPrice(m.token, false);
+  const price = Number(p) / 1e30;
 
-  try {
-    const price = await getSafePrice(market.token);
-    const { bids, asks } = makeSyntheticOB(price);
-
-    res.json({
-      ticker_id: id,
-      timestamp: Date.now(),
-      bids,
-      asks
-    });
-  } catch (e) {
-    console.log("orderbook error:", e);
-    res.status(500).json({ error: e.toString() });
-  }
+  const { bids, asks } = makeOB(price);
+  res.json({
+    ticker_id: id,
+    timestamp: Date.now(),
+    bids,
+    asks
+  });
 });
 
-// ----------------------------------------------
-// /supply/money
-// ----------------------------------------------
+// SUPPLY
 app.get("/supply/money", async (req, res) => {
   try {
     const total = await money.totalSupply();
@@ -221,16 +133,15 @@ app.get("/supply/money", async (req, res) => {
       decimals
     });
   } catch (e) {
-    console.log("supply error:", e);
     res.status(500).json({ error: e.toString() });
   }
 });
 
-// ----------------------------------------------
-// Server start (after loading markets)
-// ----------------------------------------------
-initMarkets().then(() => {
-  app.listen(PORT, () => {
-    console.log(`MoneyX CG/CMC API running on port ${PORT}`);
-  });
+// HEALTHCHECK
+app.get("/", (req, res) => {
+  res.json({ status: "ok", name: "MoneyX CG/CMC API" });
 });
+
+app.listen(PORT, () =>
+  console.log(`MoneyX CG/CMC API running on port ${PORT}`)
+);
