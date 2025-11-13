@@ -7,8 +7,10 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Load ABIs
 const PriceFeedABI = JSON.parse(fs.readFileSync(path.join(__dirname, "abi/VaultPriceFeed.json")));
-const ERC20ABI = JSON.parse(fs.readFileSync(path.join(__dirname, "abi/ERC20.json")));
+const ERC20ABI     = JSON.parse(fs.readFileSync(path.join(__dirname, "abi/ERC20.json")));
+const VaultABI     = JSON.parse(fs.readFileSync(path.join(__dirname, "abi/Vault.json")));
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -23,10 +25,12 @@ const provider = new ethers.JsonRpcProvider("https://bsc-dataseed1.binance.org")
 const ADDR = {
   PRICE_FEED: "0x31086dBa211D1e66F51701535AD4C0e0f98A3482",
   MONEY:      "0x4fFe5ec4D8B9822e01c9E49678884bAEc17F60D9",
+  VAULT:      "0xeB0E5E1a8500317A1B8fDd195097D5509Ef861de"
 };
 
 const priceFeed = new ethers.Contract(ADDR.PRICE_FEED, PriceFeedABI, provider);
-const money = new ethers.Contract(ADDR.MONEY, ERC20ABI, provider);
+const money     = new ethers.Contract(ADDR.MONEY, ERC20ABI, provider);
+const vault     = new ethers.Contract(ADDR.VAULT, VaultABI, provider);
 
 // Market mapping
 const MARKETS = [
@@ -38,7 +42,7 @@ const MARKETS = [
   { id: "XRP-PERP", token: "0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE", base: "XRP" },
 ];
 
-// Synthetic orderbook generator
+// Synthetic orderbook
 function makeOB(price) {
   const bids = [], asks = [];
   for (let i = 1; i <= 50; i++) {
@@ -48,15 +52,30 @@ function makeOB(price) {
   return { bids, asks };
 }
 
-// CONTRACTS
+// REAL ON-CHAIN OPEN INTEREST
+async function getOpenInterest(token) {
+  const longOI  = await vault.guaranteedUsd(token);
+  const shortOI = await vault.globalShortSizes(token);
+
+  return {
+    long: Number(longOI) / 1e30,
+    short: Number(shortOI) / 1e30
+  };
+}
+
+// CONTRACTS — MAIN CMC/CG ENDPOINT
 app.get("/contracts", async (req, res) => {
   try {
     const now = Math.floor(Date.now() / 1000);
     const out = [];
 
     for (const m of MARKETS) {
-      const p = await priceFeed.getPrimaryPrice(m.token, false);
-      const price = Number(p) / 1e30;
+      const raw = await priceFeed.getPrimaryPrice(m.token, false);
+      const price = Number(raw) / 1e30;
+
+      // Pull live OI
+      const oi = await getOpenInterest(m.token);
+      const openInterestUsd = oi.long + oi.short;
 
       out.push({
         ticker_id: m.id,
@@ -70,8 +89,11 @@ app.get("/contracts", async (req, res) => {
         high: price * 1.01,
         low: price * 0.99,
         product_type: "perpetual",
-        open_interest: 0,
-        open_interest_usd: 0,
+
+        // REAL VALUES
+        open_interest: openInterestUsd,
+        open_interest_usd: openInterestUsd,
+
         index_price: price,
         index_name: `${m.base}-USD Price Feed`,
         index_currency: "USD",
@@ -88,13 +110,14 @@ app.get("/contracts", async (req, res) => {
 
     res.json(out);
   } catch (e) {
+    console.error("CONTRACTS ERROR:", e);
     res.status(500).json({ error: e.toString() });
   }
 });
 
 // CONTRACT SPECS JSON
 app.get("/contract_specs", (req, res) => {
-  let out = {};
+  const out = {};
   for (const m of MARKETS) {
     out[m.id] = {
       contract_type: "vanilla",
@@ -114,11 +137,10 @@ app.get("/contract-specs.html", (req, res) => {
 app.get("/orderbook", async (req, res) => {
   const id = req.query.ticker_id;
   const m = MARKETS.find(x => x.id === id);
-
   if (!m) return res.status(400).json({ error: "Unknown ticker_id" });
 
-  const p = await priceFeed.getPrimaryPrice(m.token, false);
-  const price = Number(p) / 1e30;
+  const raw = await priceFeed.getPrimaryPrice(m.token, false);
+  const price = Number(raw) / 1e30;
 
   const { bids, asks } = makeOB(price);
 
@@ -135,7 +157,6 @@ app.get("/supply/money", async (req, res) => {
   try {
     const total = await money.totalSupply();
     const decimals = await money.decimals();
-
     res.json({
       total_supply: total.toString(),
       circulating_supply: total.toString(),
@@ -148,7 +169,11 @@ app.get("/supply/money", async (req, res) => {
 
 // HEALTHCHECK
 app.get("/", (req, res) => {
-  res.json({ status: "ok", name: "MoneyX CG/CMC API" });
+  res.json({
+    status: "ok",
+    name: "MoneyX CG/CMC API",
+    timestamp: Date.now()
+  });
 });
 
 app.listen(PORT, () =>
