@@ -20,7 +20,7 @@ Contracts	https://api.moneyxpro.com/contracts
 Contract Specs	https://api.moneyxpro.com/contract_specs
 Orderbook	https://api.moneyxpro.com/orderbook?ticker_id=BTC-PERP
 MONEY Supply	https://api.moneyxpro.com/supply/money
-Healthcheck	https://api.moneyxpro.com/health
+Healthcheck	https://api.moneyxpro.com/
 
 All endpoints require:
 	•	❌ No API key
