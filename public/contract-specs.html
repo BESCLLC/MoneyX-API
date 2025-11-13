@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MoneyX Perpetual Contract Specifications</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font-family: Arial; max-width: 900px; margin: auto; padding: 40px; }
+  h1 { color: #2b74ff; }
+  table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+  th, td { border: 1px solid #ccc; padding: 10px; text-align: left; }
+  th { background: #f7f9ff; }
+</style>
+</head>
+<body>
+
+<h1>MoneyX Perpetual Futures — Contract Specifications</h1>
+
+<p>MoneyX supports perpetual futures contracts for major crypto assets on BNB Smart Chain.  
+All contracts use oracle-based USD pricing with a 1e30 precision model borrowed from GMX.</p>
+
+<table>
+<tr><th>Ticker</th><th>Contract Type</th><th>Underlying Index</th><th>Contract Size</th><th>Settlement Asset</th><th>Leverage</th><th>Funding Interval</th></tr>
+
+<tr><td>BTC-PERP</td><td>Perpetual</td><td>BTC/USD (Chainlink)</td><td>1 BTC</td><td>USDG</td><td>Up to 100×</td><td>1 hour</td></tr>
+<tr><td>ETH-PERP</td><td>Perpetual</td><td>ETH/USD (Chainlink)</td><td>1 ETH</td><td>USDG</td><td>Up to 100×</td><td>1 hour</td></tr>
+<tr><td>BNB-PERP</td><td>Perpetual</td><td>BNB/USD (Chainlink)</td><td>1 BNB</td><td>USDG</td><td>Up to 100×</td><td>1 hour</td></tr>
+<tr><td>SOL-PERP</td><td>Perpetual</td><td>SOL/USD (Chainlink)</td><td>1 SOL</td><td>USDG</td><td>Up to 100×</td><td>1 hour</td></tr>
+<tr><td>DOGE-PERP</td><td>Perpetual</td><td>DOGE/USD (Chainlink)</td><td>1 DOGE</td><td>USDG</td><td>Up to 100×</td><td>1 hour</td></tr>
+<tr><td>XRP-PERP</td><td>Perpetual</td><td>XRP/USD (Chainlink)</td><td>1 XRP</td><td>USDG</td><td>Up to 100×</td><td>1 hour</td></tr>
+
+</table>
+
+<p><strong>Pricing:</strong> All index prices come from Chainlink oracles through the MoneyX VaultPriceFeed.<br>
+<strong>Funding:</strong> Calculated based on long/short imbalance with hourly updates.<br>
+<strong>Expiry:</strong> None — these are non-expiring perpetual contracts.</p>
+
+</body>
+</html>
