@@ -7,12 +7,14 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load ABIs
 const PriceFeedABI = JSON.parse(fs.readFileSync(path.join(__dirname, "abi/VaultPriceFeed.json")));
 const ERC20ABI = JSON.parse(fs.readFileSync(path.join(__dirname, "abi/ERC20.json")));
 
 const app = express();
 const PORT = process.env.PORT || 8080;
+
+// Serve public folder (for contract-specs.html)
+app.use(express.static(path.join(__dirname, "public")));
 
 // BSC RPC
 const provider = new ethers.JsonRpcProvider("https://bsc-dataseed1.binance.org");
@@ -36,7 +38,7 @@ const MARKETS = [
   { id: "XRP-PERP", token: "0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE", base: "XRP" },
 ];
 
-// Generate synthetic orderbook
+// Synthetic orderbook generator
 function makeOB(price) {
   const bids = [], asks = [];
   for (let i = 1; i <= 50; i++) {
@@ -46,7 +48,7 @@ function makeOB(price) {
   return { bids, asks };
 }
 
-// GET CONTRACTS
+// CONTRACTS
 app.get("/contracts", async (req, res) => {
   try {
     const now = Math.floor(Date.now() / 1000);
@@ -90,7 +92,7 @@ app.get("/contracts", async (req, res) => {
   }
 });
 
-// CONTRACT SPECS
+// CONTRACT SPECS JSON
 app.get("/contract_specs", (req, res) => {
   let out = {};
   for (const m of MARKETS) {
@@ -103,16 +105,23 @@ app.get("/contract_specs", (req, res) => {
   res.json(out);
 });
 
+// CONTRACT SPECS HTML PAGE
+app.get("/contract-specs.html", (req, res) => {
+  res.sendFile(path.join(__dirname, "public/contract-specs.html"));
+});
+
 // ORDERBOOK
 app.get("/orderbook", async (req, res) => {
   const id = req.query.ticker_id;
   const m = MARKETS.find(x => x.id === id);
+
   if (!m) return res.status(400).json({ error: "Unknown ticker_id" });
 
   const p = await priceFeed.getPrimaryPrice(m.token, false);
   const price = Number(p) / 1e30;
 
   const { bids, asks } = makeOB(price);
+
   res.json({
     ticker_id: id,
     timestamp: Date.now(),
