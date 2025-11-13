@@ -1,0 +1,9 @@
+services:
+  api:
+    build:
+      dockerfile: Dockerfile
+    env:
+      PORT: 3001
+    ports:
+      - port: 3001
+        protocol: tcp
