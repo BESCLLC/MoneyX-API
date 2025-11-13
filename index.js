@@ -12,30 +12,20 @@ const __dirname = path.dirname(__filename);
    SAFE JSON (Fixes BigInt serialization)
 -------------------------------------------------- */
 const safeJson = (obj) =>
-  JSON.parse(
-    JSON.stringify(obj, (_, v) =>
-      typeof v === "bigint" ? v.toString() : v
-    )
-  );
+  JSON.parse(JSON.stringify(obj, (_, v) => (typeof v === "bigint" ? v.toString() : v)));
 
 /* --------------------------------------------------
    Load ABIs
 -------------------------------------------------- */
-const PriceFeedABI = JSON.parse(
-  fs.readFileSync(path.join(__dirname, "abi/VaultPriceFeed.json"))
-);
-const ERC20ABI = JSON.parse(
-  fs.readFileSync(path.join(__dirname, "abi/ERC20.json"))
-);
-const VaultABI = JSON.parse(
-  fs.readFileSync(path.join(__dirname, "abi/Vault.json"))
-);
+const PriceFeedABI = JSON.parse(fs.readFileSync(path.join(__dirname, "abi/VaultPriceFeed.json")));
+const ERC20ABI = JSON.parse(fs.readFileSync(path.join(__dirname, "abi/ERC20.json")));
+const VaultABI = JSON.parse(fs.readFileSync(path.join(__dirname, "abi/Vault.json")));
 
 const app = express();
 const PORT = process.env.PORT || 8080;
 
 /* --------------------------------------------------
-   Serve /public (critical for CG: contract-specs.html)
+   Serve /public (critical for CG)
 -------------------------------------------------- */
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -70,13 +60,14 @@ const MARKETS = [
 ];
 
 /* --------------------------------------------------
-   Synthetic Orderbook (Required by CMC for Perps)
+   Synthetic Orderbook (fixed: no negative DOGE bids)
 -------------------------------------------------- */
 function makeOrderbook(price) {
   const bids = [], asks = [];
   for (let i = 1; i <= 50; i++) {
-    bids.push([price - i, 1]);
-    asks.push([price + i, 1]);
+    const step = price * 0.0005 * i;  // 0.05% steps
+    bids.push([price - step, 1]);
+    asks.push([price + step, 1]);
   }
   return { bids, asks };
 }
@@ -111,7 +102,6 @@ async function gql(endpoint, query) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query }),
     });
-
     const j = await r.json();
     return j.data;
   } catch (e) {
@@ -121,16 +111,12 @@ async function gql(endpoint, query) {
 }
 
 /* --------------------------------------------------
-   24H REAL VOLUME (CMC/CG Required)
+   24H REAL VOLUME (divide by 1e30 FIXED)
 -------------------------------------------------- */
 async function get24hVolume() {
   const q = `
     {
-      volumeStats(
-        first: 1,
-        orderBy: timestamp,
-        orderDirection: desc
-      ) {
+      volumeStats(first: 1, orderBy: timestamp, orderDirection: desc) {
         margin
         swap
         liquidation
@@ -146,16 +132,16 @@ async function get24hVolume() {
   const v = d.volumeStats[0];
 
   return (
-    Number(v.margin) +
-    Number(v.swap) +
-    Number(v.liquidation) +
-    Number(v.mint) +
-    Number(v.burn)
+    Number(v.margin) / 1e30 +
+    Number(v.swap) / 1e30 +
+    Number(v.liquidation) / 1e30 +
+    Number(v.mint) / 1e30 +
+    Number(v.burn) / 1e30
   );
 }
 
 /* --------------------------------------------------
-   24H HIGH / LOW (From Price Candles)
+   24H HIGH / LOW (from PriceCandles)
 -------------------------------------------------- */
 async function getHighLow(token) {
   const now = Math.floor(Date.now() / 1000);
@@ -167,10 +153,7 @@ async function getHighLow(token) {
         first: 500,
         orderBy: timestamp,
         orderDirection: desc,
-        where: {
-          token: "${token.toLowerCase()}",
-          timestamp_gt: ${start}
-        }
+        where: { token: "${token.toLowerCase()}", timestamp_gt: ${start} }
       ) {
         high
         low
@@ -184,10 +167,29 @@ async function getHighLow(token) {
   const highs = d.priceCandles.map((c) => Number(c.high));
   const lows = d.priceCandles.map((c) => Number(c.low));
 
-  return {
-    high: Math.max(...highs),
-    low: Math.min(...lows),
-  };
+  return { high: Math.max(...highs), low: Math.min(...lows) };
+}
+
+/* --------------------------------------------------
+   FUNDING RATE (from subgraph)
+-------------------------------------------------- */
+async function getFundingRate(token) {
+  const q = `
+    {
+      fundingRates(
+        first: 1,
+        orderBy: timestamp,
+        orderDirection: desc,
+        where: { token: "${token.toLowerCase()}" }
+      ) {
+        endFundingRate
+      }
+    }
+  `;
+  const d = await gql(SUBGRAPHS.STATS, q);
+  if (!d?.fundingRates?.length) return 0;
+
+  return Number(d.fundingRates[0].endFundingRate) / 1e30;
 }
 
 /* ==================================================
@@ -205,6 +207,9 @@ app.get("/contracts", async (req, res) => {
 
       const oi = await getOpenInterest(m.token);
       const hl = await getHighLow(m.token);
+      const funding = await getFundingRate(m.token);
+
+      const spread = price * 0.001; // 0.1% spread, CG-approved
 
       out.push({
         ticker_id: m.id,
@@ -215,8 +220,8 @@ app.get("/contracts", async (req, res) => {
         base_volume: volume24h,
         target_volume: volume24h,
 
-        bid: price - 1,
-        ask: price + 1,
+        bid: price - spread,
+        ask: price + spread,
 
         high: hl.high ?? price * 1.01,
         low: hl.low ?? price * 0.99,
@@ -230,8 +235,8 @@ app.get("/contracts", async (req, res) => {
         index_name: `${m.base}-USD Price Feed`,
         index_currency: "USD",
 
-        funding_rate: 0.0001,
-        next_funding_rate: 0.0001,
+        funding_rate: funding,
+        next_funding_rate: funding,
         next_funding_rate_timestamp: now + 3600,
 
         contract_type: "vanilla",
@@ -248,7 +253,7 @@ app.get("/contracts", async (req, res) => {
 });
 
 /* ==================================================
-   /contract_specs — JSON (CG Required)
+   /contract_specs
 ================================================== */
 app.get("/contract_specs", (req, res) => {
   const out = {};
@@ -263,15 +268,14 @@ app.get("/contract_specs", (req, res) => {
 });
 
 /* ==================================================
-   /contract-specs.html — **PUBLIC HTML PAGE**
-   ⚠️ CoinGecko REQUIRED — MUST NOT REMOVE
+   PUBLIC HTML for CMC/CG
 ================================================== */
 app.get("/contract-specs.html", (req, res) => {
   res.sendFile(path.join(__dirname, "public/contract-specs.html"));
 });
 
 /* ==================================================
-   ORDERBOOK ENDPOINT
+   ORDERBOOK
 ================================================== */
 app.get("/orderbook", async (req, res) => {
   const id = req.query.ticker_id;
@@ -284,18 +288,11 @@ app.get("/orderbook", async (req, res) => {
 
   const { bids, asks } = makeOrderbook(price);
 
-  res.json(
-    safeJson({
-      ticker_id: id,
-      timestamp: Date.now(),
-      bids,
-      asks,
-    })
-  );
+  res.json(safeJson({ ticker_id: id, timestamp: Date.now(), bids, asks }));
 });
 
 /* ==================================================
-   SUPPLY ENDPOINT
+   MONEY SUPPLY
 ================================================== */
 app.get("/supply/money", async (req, res) => {
   try {
@@ -315,16 +312,10 @@ app.get("/supply/money", async (req, res) => {
 });
 
 /* ==================================================
-   ROOT — HEALTHCHECK
+   HEALTHCHECK
 ================================================== */
 app.get("/", (req, res) => {
-  res.json(
-    safeJson({
-      status: "ok",
-      name: "MoneyX CG/CMC API",
-      timestamp: Date.now(),
-    })
-  );
+  res.json(safeJson({ status: "ok", name: "MoneyX CG/CMC API", timestamp: Date.now() }));
 });
 
 /* ==================================================
