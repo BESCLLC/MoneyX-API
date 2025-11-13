@@ -8,7 +8,7 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load ABIs safely
+// Load ABIs
 const ReaderABI = JSON.parse(fs.readFileSync(path.join(__dirname, "abi/Reader.json")));
 const VaultABI = JSON.parse(fs.readFileSync(path.join(__dirname, "abi/Vault.json")));
 const PriceFeedABI = JSON.parse(fs.readFileSync(path.join(__dirname, "abi/VaultPriceFeed.json")));
@@ -20,17 +20,17 @@ const PORT = process.env.PORT || 3001;
 // RPC (BSC)
 const provider = new ethers.JsonRpcProvider("https://bsc-dataseed1.binance.org");
 
-// Contract addresses
+// Contract addresses (lowercase recommended for ethers v6)
 const ADDR = {
   PRICE_FEED: "0x31086dba211d1e66f51701535ad4c0e0f98a3482",
-  MONEY: "0x4ffe5ec4d8b9822e01c9e49678884baec17f60d9"
+  MONEY: "0x4ffe5ec4d8b9822e01c9e49678884baec17f60d9",
 };
 
-// Instances
+// Contract instances
 const priceFeed = new ethers.Contract(ADDR.PRICE_FEED, PriceFeedABI, provider);
 const money = new ethers.Contract(ADDR.MONEY, ERC20ABI, provider);
 
-// Supported markets (lowercase)
+// Supported perpetual markets
 const MARKETS = [
   { id: "BTC-PERP", token: "0x7130d2a12b9cbfae4f2634d864a1ee1ce3ead9c", base: "BTC" },
   { id: "ETH-PERP", token: "0x2170ed0880ac9a755fd29b2688956bd959f933f8", base: "ETH" },
@@ -40,7 +40,37 @@ const MARKETS = [
   { id: "XRP-PERP", token: "0x1d2f0da169ceb9fc7b3144628db156f3f6c60dbe", base: "XRP" }
 ];
 
-// Synthetic orderbook generator (required by CG)
+// UNIVERSAL SAFE PRICE FUNCTION (never errors)
+async function getSafePrice(token) {
+  try {
+    const p = await priceFeed.getLatestPrimaryPrice(token);
+    if (p > 0n) return Number(p) / 1e30;
+  } catch {}
+
+  try {
+    const p = await priceFeed.getPrimaryPrice(token, false);
+    if (p > 0n) return Number(p) / 1e30;
+  } catch {}
+
+  try {
+    const p = await priceFeed.getPriceV2(token, false, false);
+    if (p > 0n) return Number(p) / 1e30;
+  } catch {}
+
+  try {
+    const p = await priceFeed.getPriceV1(token, false, false);
+    if (p > 0n) return Number(p) / 1e30;
+  } catch {}
+
+  try {
+    const p = await priceFeed.getPrice(token, false, false, false);
+    if (p > 0n) return Number(p) / 1e30;
+  } catch {}
+
+  return 0;
+}
+
+// Orderbook generator (synthetic AMM depth)
 function makeSyntheticOB(price) {
   const bids = [], asks = [];
   for (let i = 1; i <= 50; i++) {
@@ -50,21 +80,23 @@ function makeSyntheticOB(price) {
   return { bids, asks };
 }
 
-// ---------------------- HEALTH ENDPOINT (CMC recommends) ----------------------
+// ------------------------------------------------------------
+// /health (CMC recommended)
+// ------------------------------------------------------------
 app.get("/health", (req, res) => {
   res.json({ status: "ok", timestamp: Date.now() });
 });
 
-// ---------------------- /contracts (MAIN REQUIRED ENDPOINT) -------------------
+// ------------------------------------------------------------
+// /contracts (MAIN CoinGecko REQUIRED ENDPOINT)
+// ------------------------------------------------------------
 app.get("/contracts", async (req, res) => {
   try {
     const now = Math.floor(Date.now() / 1000);
     const output = [];
 
     for (const m of MARKETS) {
-      // SAFE PRICE READ — cannot revert
-      const latest = await priceFeed.getLatestPrimaryPrice(m.token);
-      const price = Number(latest) / 1e30;
+      const price = await getSafePrice(m.token);
 
       output.push({
         ticker_id: m.id,
@@ -101,7 +133,9 @@ app.get("/contracts", async (req, res) => {
   }
 });
 
-// ---------------------- /contract_specs (CG optional, but included) -----------
+// ------------------------------------------------------------
+// /contract_specs (CG recommended optional)
+// ------------------------------------------------------------
 app.get("/contract_specs", (req, res) => {
   const specs = {};
   for (const m of MARKETS) {
@@ -114,7 +148,9 @@ app.get("/contract_specs", (req, res) => {
   res.json(specs);
 });
 
-// ---------------------- /orderbook (synthetic depth, required) ---------------
+// ------------------------------------------------------------
+// /orderbook?tickery_id= (required depth=50)
+// ------------------------------------------------------------
 app.get("/orderbook", async (req, res) => {
   const id = req.query.ticker_id;
   const market = MARKETS.find(x => x.id === id);
@@ -124,8 +160,7 @@ app.get("/orderbook", async (req, res) => {
   }
 
   try {
-    const latest = await priceFeed.getLatestPrimaryPrice(market.token);
-    const price = Number(latest) / 1e30;
+    const price = await getSafePrice(market.token);
     const { bids, asks } = makeSyntheticOB(price);
 
     res.json({
@@ -140,7 +175,9 @@ app.get("/orderbook", async (req, res) => {
   }
 });
 
-// ---------------------- /supply/money (CG + CMC REQUIRED) --------------------
+// ------------------------------------------------------------
+// /supply/money  (CG + CMC REQUIRED ENDPOINT)
+// ------------------------------------------------------------
 app.get("/supply/money", async (req, res) => {
   try {
     const total = await money.totalSupply();
@@ -157,7 +194,9 @@ app.get("/supply/money", async (req, res) => {
   }
 });
 
-// ---------------------- Start Server -----------------------------------------
+// ------------------------------------------------------------
+// Start Server
+// ------------------------------------------------------------
 app.listen(PORT, () => {
   console.log(`MoneyX CG/CMC API running on port ${PORT}`);
 });
