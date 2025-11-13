@@ -36,7 +36,7 @@ const money = new ethers.Contract(ADDR.MONEY, ERC20ABI, provider);
 const MARKETS = [
   { id: "BTC-PERP", token: "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c", base: "BTC" },
   { id: "ETH-PERP", token: "0x2170Ed0880ac9A755fd29B2688956BD959F933F8", base: "ETH" },
-  { id: "BNB-PERP", token: "0xB8c77482e45F1F44De1745F52C74426C631bDD52", base: "BNB" },
+  { id: "BNB-PERP", token: "0xB8c77482e45F1F44De1745F52C74426C631bdd52", base: "BNB" },
   { id: "SOL-PERP", token: "0x570A5d02638F9E7b20dfE31aA15d1d0505AFcD6f", base: "SOL" },
   { id: "DOGE-PERP", token: "0xbA2aE424d960c26247Dd6c32edC70B295c744C43", base: "DOGE" },
   { id: "XRP-PERP", token: "0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE", base: "XRP" }
