@@ -7,6 +7,18 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// -------------------------
+// GLOBAL BIGINT → STRING FIX
+// -------------------------
+function safeJson(obj) {
+  return JSON.parse(
+    JSON.stringify(
+      obj,
+      (_, v) => (typeof v === "bigint" ? v.toString() : v)
+    )
+  );
+}
+
 // Load ABIs
 const PriceFeedABI = JSON.parse(fs.readFileSync(path.join(__dirname, "abi/VaultPriceFeed.json")));
 const ERC20ABI     = JSON.parse(fs.readFileSync(path.join(__dirname, "abi/ERC20.json")));
@@ -15,7 +27,7 @@ const VaultABI     = JSON.parse(fs.readFileSync(path.join(__dirname, "abi/Vault.
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// Serve public folder (for contract-specs.html)
+// Serve public folder
 app.use(express.static(path.join(__dirname, "public")));
 
 // BSC RPC
@@ -73,7 +85,6 @@ app.get("/contracts", async (req, res) => {
       const raw = await priceFeed.getPrimaryPrice(m.token, false);
       const price = Number(raw) / 1e30;
 
-      // Pull live OI
       const oi = await getOpenInterest(m.token);
       const openInterestUsd = oi.long + oi.short;
 
@@ -90,7 +101,6 @@ app.get("/contracts", async (req, res) => {
         low: price * 0.99,
         product_type: "perpetual",
 
-        // REAL VALUES
         open_interest: openInterestUsd,
         open_interest_usd: openInterestUsd,
 
@@ -108,7 +118,7 @@ app.get("/contracts", async (req, res) => {
       });
     }
 
-    res.json(out);
+    res.json(safeJson(out));
   } catch (e) {
     console.error("CONTRACTS ERROR:", e);
     res.status(500).json({ error: e.toString() });
@@ -125,10 +135,10 @@ app.get("/contract_specs", (req, res) => {
       contract_price: null
     };
   }
-  res.json(out);
+  res.json(safeJson(out));
 });
 
-// CONTRACT SPECS HTML PAGE
+// CONTRACT SPECS HTML
 app.get("/contract-specs.html", (req, res) => {
   res.sendFile(path.join(__dirname, "public/contract-specs.html"));
 });
@@ -144,12 +154,14 @@ app.get("/orderbook", async (req, res) => {
 
   const { bids, asks } = makeOB(price);
 
-  res.json({
-    ticker_id: id,
-    timestamp: Date.now(),
-    bids,
-    asks
-  });
+  res.json(
+    safeJson({
+      ticker_id: id,
+      timestamp: Date.now(),
+      bids,
+      asks
+    })
+  );
 });
 
 // SUPPLY
@@ -157,11 +169,14 @@ app.get("/supply/money", async (req, res) => {
   try {
     const total = await money.totalSupply();
     const decimals = await money.decimals();
-    res.json({
-      total_supply: total.toString(),
-      circulating_supply: total.toString(),
-      decimals
-    });
+
+    res.json(
+      safeJson({
+        total_supply: total.toString(),
+        circulating_supply: total.toString(),
+        decimals
+      })
+    );
   } catch (e) {
     res.status(500).json({ error: e.toString() });
   }
@@ -169,11 +184,13 @@ app.get("/supply/money", async (req, res) => {
 
 // HEALTHCHECK
 app.get("/", (req, res) => {
-  res.json({
-    status: "ok",
-    name: "MoneyX CG/CMC API",
-    timestamp: Date.now()
-  });
+  res.json(
+    safeJson({
+      status: "ok",
+      name: "MoneyX CG/CMC API",
+      timestamp: Date.now()
+    })
+  );
 });
 
 app.listen(PORT, () =>
