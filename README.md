@@ -8,6 +8,7 @@ https://github.com/BESCLLC/MoneyX-API/README.md
 
 📊 Stats Dashboard
 https://stats.moneyxpro.com
+https://stats.moneyxpro.com/markets
 
 🌐 Base API URL
 https://api.moneyxpro.com
