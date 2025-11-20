@@ -60,12 +60,12 @@ const MARKETS = [
 ];
 
 /* --------------------------------------------------
-   Synthetic Orderbook (fixed: no negative DOGE bids)
+   Synthetic Orderbook
 -------------------------------------------------- */
 function makeOrderbook(price) {
   const bids = [], asks = [];
   for (let i = 1; i <= 50; i++) {
-    const step = price * 0.0005 * i;  // 0.05% steps
+    const step = price * 0.0005 * i;
     bids.push([price - step, 1]);
     asks.push([price + step, 1]);
   }
@@ -111,33 +111,34 @@ async function gql(endpoint, query) {
 }
 
 /* --------------------------------------------------
-   24H REAL VOLUME (divide by 1e30 FIXED)
+   PER-MARKET 24H VOLUME (real - from moneyx-trades)
 -------------------------------------------------- */
-async function get24hVolume() {
+async function getPairVolume24h(token) {
+  const now = Math.floor(Date.now() / 1000);
+  const start = now - 24 * 3600;
+
   const q = `
     {
-      volumeStats(first: 1, orderBy: timestamp, orderDirection: desc) {
-        margin
-        swap
-        liquidation
-        mint
-        burn
+      marginTrades(
+        first: 1000,
+        orderBy: timestamp,
+        orderDirection: desc,
+        where: { token: "${token.toLowerCase()}", timestamp_gt: ${start} }
+      ) {
+        size
       }
     }
   `;
 
-  const d = await gql(SUBGRAPHS.STATS, q);
-  if (!d?.volumeStats?.length) return 0;
+  const d = await gql(SUBGRAPHS.TRADES, q);
+  if (!d?.marginTrades || d.marginTrades.length === 0) return 0;
 
-  const v = d.volumeStats[0];
+  let total = 0;
+  for (const t of d.marginTrades) {
+    total += Number(t.size) / 1e30;
+  }
 
-  return (
-    Number(v.margin) / 1e30 +
-    Number(v.swap) / 1e30 +
-    Number(v.liquidation) / 1e30 +
-    Number(v.mint) / 1e30 +
-    Number(v.burn) / 1e30
-  );
+  return total;
 }
 
 /* --------------------------------------------------
@@ -171,7 +172,7 @@ async function getHighLow(token) {
 }
 
 /* --------------------------------------------------
-   FUNDING RATE (from subgraph)
+   FUNDING RATE
 -------------------------------------------------- */
 async function getFundingRate(token) {
   const q = `
@@ -198,7 +199,6 @@ async function getFundingRate(token) {
 app.get("/contracts", async (req, res) => {
   try {
     const now = Math.floor(Date.now() / 1000);
-    const volume24h = await get24hVolume();
     const out = [];
 
     for (const m of MARKETS) {
@@ -208,8 +208,9 @@ app.get("/contracts", async (req, res) => {
       const oi = await getOpenInterest(m.token);
       const hl = await getHighLow(m.token);
       const funding = await getFundingRate(m.token);
+      const vol = await getPairVolume24h(m.token);  // ← REAL per-market volume
 
-      const spread = price * 0.001; // 0.1% spread, CG-approved
+      const spread = price * 0.001; // 0.1% spread
 
       out.push({
         ticker_id: m.id,
@@ -217,8 +218,8 @@ app.get("/contracts", async (req, res) => {
         target_currency: "USD",
 
         last_price: price,
-        base_volume: volume24h,
-        target_volume: volume24h,
+        base_volume: vol,
+        target_volume: vol,
 
         bid: price - spread,
         ask: price + spread,
@@ -322,5 +323,5 @@ app.get("/", (req, res) => {
    START SERVER
 ================================================== */
 app.listen(PORT, () =>
-  console.log(`🔥 MoneyX Market Data API running on port ${PORT}`)
+  console.log(`MoneyX Market Data API running on port ${PORT}`)
 );
