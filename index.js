@@ -51,12 +51,12 @@ const vault = new ethers.Contract(ADDR.VAULT, VaultABI, provider);
    SUPPORTED PERP MARKETS
 -------------------------------------------------- */
 const MARKETS = [
-  { id: "BTC-PERP", token: "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c", base: "BTC" },
-  { id: "ETH-PERP", token: "0x2170Ed0880ac9A755fd29B2688956BD959F933F8", base: "ETH" },
-  { id: "BNB-PERP", token: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c", base: "BNB" },
-  { id: "SOL-PERP", token: "0x570A5D26f7765Ecb712C0924E4De545B89fD43dF", base: "SOL" },
-  { id: "DOGE-PERP", token: "0xbA2aE424d960c26247Dd6c32edC70B295c744C43", base: "DOGE" },
-  { id: "XRP-PERP", token: "0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE", base: "XRP" },
+  { id: "BTC-PERP", token: "0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c", base: "BTC" },
+  { id: "ETH-PERP", token: "0x2170ed0880ac9a755fd29b2688956bd959f933f8", base: "ETH" },
+  { id: "BNB-PERP", token: "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c", base: "BNB" },
+  { id: "SOL-PERP", token: "0x570a5d26f7765ecb712c0924e4de545b89fd43df", base: "SOL" },
+  { id: "DOGE-PERP", token: "0xba2ae424d960c26247dd6c32edc70b295c744c43", base: "DOGE" },
+  { id: "XRP-PERP", token: "0x1d2f0da169ceb9fc7b3144628db156f3f6c60dbe", base: "XRP" },
 ];
 
 /* --------------------------------------------------
@@ -91,8 +91,7 @@ async function getOpenInterest(token) {
 -------------------------------------------------- */
 const SUBGRAPHS = {
   STATS: "https://api.goldsky.com/api/public/project_clhjdosm96z2v49wghcvog65t/subgraphs/project_clhjdosm96z2v4/moneyx-stats/gn",
-  RAW:   "https://api.goldsky.com/api/public/project_clhjdosm96z2v49wghcvog65t/subgraphs/moneyx-raw/v1.0.0/gn",
-  TRADES:"https://api.goldsky.com/api/public/project_clhjdosm96z2v49wghcvog65t/subgraphs/moneyx-trades/v1.0.1/gn",
+  TRADES: "https://api.goldsky.com/api/public/project_clhjdosm96z2v49wghcvog65t/subgraphs/moneyx-trades/v1.0.1/gn",
 };
 
 async function gql(endpoint, query) {
@@ -111,38 +110,50 @@ async function gql(endpoint, query) {
 }
 
 /* --------------------------------------------------
-   PER-MARKET 24H VOLUME (real - from moneyx-trades)
+   REAL PER-MARKET 24H VOLUME (from hourlyVolumeByTokens)
 -------------------------------------------------- */
-async function getPairVolume24h(token) {
+async function getPerMarket24hVolume(token) {
   const now = Math.floor(Date.now() / 1000);
   const start = now - 24 * 3600;
 
   const q = `
     {
-      marginTrades(
+      hourlyVolumeByTokens(
         first: 1000,
         orderBy: timestamp,
         orderDirection: desc,
-        where: { token: "${token.toLowerCase()}", timestamp_gt: ${start} }
+        where: {
+          tokenA: "${token.toLowerCase()}",
+          timestamp_gt: ${start}
+        }
       ) {
-        size
+        margin
+        swap
+        liquidation
+        mint
+        burn
       }
     }
   `;
 
   const d = await gql(SUBGRAPHS.TRADES, q);
-  if (!d?.marginTrades || d.marginTrades.length === 0) return 0;
+  if (!d?.hourlyVolumeByTokens || d.hourlyVolumeByTokens.length === 0) return 0;
 
   let total = 0;
-  for (const t of d.marginTrades) {
-    total += Number(t.size) / 1e30;
+  for (const row of d.hourlyVolumeByTokens) {
+    total +=
+      Number(row.margin || 0) / 1e30 +
+      Number(row.swap || 0) / 1e30 +
+      Number(row.liquidation || 0) / 1e30 +
+      Number(row.mint || 0) / 1e30 +
+      Number(row.burn || 0) / 1e30;
   }
 
   return total;
 }
 
 /* --------------------------------------------------
-   24H HIGH / LOW (from PriceCandles)
+   24H HIGH / LOW
 -------------------------------------------------- */
 async function getHighLow(token) {
   const now = Math.floor(Date.now() / 1000);
@@ -208,9 +219,9 @@ app.get("/contracts", async (req, res) => {
       const oi = await getOpenInterest(m.token);
       const hl = await getHighLow(m.token);
       const funding = await getFundingRate(m.token);
-      const vol = await getPairVolume24h(m.token);  // ← REAL per-market volume
+      const volume24h = await getPerMarket24hVolume(m.token);  // ← REAL per-market volume
 
-      const spread = price * 0.001; // 0.1% spread
+      const spread = price * 0.001; // 0.1%
 
       out.push({
         ticker_id: m.id,
@@ -218,8 +229,8 @@ app.get("/contracts", async (req, res) => {
         target_currency: "USD",
 
         last_price: price,
-        base_volume: vol,
-        target_volume: vol,
+        base_volume: volume24h,
+        target_volume: volume24h,
 
         bid: price - spread,
         ask: price + spread,
@@ -269,7 +280,7 @@ app.get("/contract_specs", (req, res) => {
 });
 
 /* ==================================================
-   PUBLIC HTML for CMC/CG
+   PUBLIC HTML
 ================================================== */
 app.get("/contract-specs.html", (req, res) => {
   res.sendFile(path.join(__dirname, "public/contract-specs.html"));
@@ -281,12 +292,10 @@ app.get("/contract-specs.html", (req, res) => {
 app.get("/orderbook", async (req, res) => {
   const id = req.query.ticker_id;
   const m = MARKETS.find((x) => x.id === id);
-
   if (!m) return res.status(400).json({ error: "Unknown ticker_id" });
 
   const raw = await priceFeed.getPrimaryPrice(m.token, false);
   const price = Number(raw) / 1e30;
-
   const { bids, asks } = makeOrderbook(price);
 
   res.json(safeJson({ ticker_id: id, timestamp: Date.now(), bids, asks }));
@@ -323,5 +332,5 @@ app.get("/", (req, res) => {
    START SERVER
 ================================================== */
 app.listen(PORT, () =>
-  console.log(`MoneyX Market Data API running on port ${PORT}`)
+  console.log(`MoneyX Market Data API running on port ${PORT} – Volume FIXED`)
 );
