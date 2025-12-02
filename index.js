@@ -8,15 +8,11 @@ import fetch from "node-fetch";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-/* --------------------------------------------------
-   SAFE JSON (Fixes BigInt serialization)
--------------------------------------------------- */
+/* ---------------- SAFE JSON ---------------- */
 const safeJson = (obj) =>
   JSON.parse(JSON.stringify(obj, (_, v) => (typeof v === "bigint" ? v.toString() : v)));
 
-/* --------------------------------------------------
-   Load ABIs
--------------------------------------------------- */
+/* ---------------- Load ABIs ---------------- */
 const PriceFeedABI = JSON.parse(fs.readFileSync(path.join(__dirname, "abi/VaultPriceFeed.json")));
 const ERC20ABI = JSON.parse(fs.readFileSync(path.join(__dirname, "abi/ERC20.json")));
 const VaultABI = JSON.parse(fs.readFileSync(path.join(__dirname, "abi/Vault.json")));
@@ -24,19 +20,13 @@ const VaultABI = JSON.parse(fs.readFileSync(path.join(__dirname, "abi/Vault.json
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-/* --------------------------------------------------
-   Serve /public (critical for CG)
--------------------------------------------------- */
+/* ---------------- Static Dir ---------------- */
 app.use(express.static(path.join(__dirname, "public")));
 
-/* --------------------------------------------------
-   BSC RPC
--------------------------------------------------- */
+/* ---------------- RPC ---------------- */
 const provider = new ethers.JsonRpcProvider("https://bsc-dataseed1.binance.org");
 
-/* --------------------------------------------------
-   CONTRACT ADDRESSES
--------------------------------------------------- */
+/* ---------------- ADDRESSES ---------------- */
 const ADDR = {
   PRICE_FEED: "0x31086dBa211D1e66F51701535AD4C0e0f98A3482",
   MONEY: "0x4fFe5ec4D8B9822e01c9E49678884bAEc17F60D9",
@@ -47,9 +37,7 @@ const priceFeed = new ethers.Contract(ADDR.PRICE_FEED, PriceFeedABI, provider);
 const money = new ethers.Contract(ADDR.MONEY, ERC20ABI, provider);
 const vault = new ethers.Contract(ADDR.VAULT, VaultABI, provider);
 
-/* --------------------------------------------------
-   SUPPORTED PERP MARKETS
--------------------------------------------------- */
+/* ---------------- MARKETS ---------------- */
 const MARKETS = [
   { id: "BTC-PERP", token: "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c", base: "BTC" },
   { id: "ETH-PERP", token: "0x2170Ed0880ac9A755fd29B2688956BD959F933F8", base: "ETH" },
@@ -59,42 +47,35 @@ const MARKETS = [
   { id: "XRP-PERP", token: "0x1D2F0da169ceB9fC7B3144628dB156f3F6c60dBE", base: "XRP" },
 ];
 
-/* --------------------------------------------------
-   Synthetic Orderbook (fixed: no negative DOGE bids)
--------------------------------------------------- */
+/* ---------------- ORDERBOOK ---------------- */
 function makeOrderbook(price) {
   const bids = [], asks = [];
   for (let i = 1; i <= 50; i++) {
-    const step = price * 0.0005 * i;  // 0.05% steps
+    const step = price * 0.0005 * i;
     bids.push([price - step, 1]);
     asks.push([price + step, 1]);
   }
   return { bids, asks };
 }
 
-/* --------------------------------------------------
-   On-chain Open Interest
--------------------------------------------------- */
+/* ---------------- OPEN INTEREST ---------------- */
 async function getOpenInterest(token) {
   const longOI = await vault.guaranteedUsd(token);
   const shortOI = await vault.globalShortSizes(token);
-
   return {
-    long: parseFloat(formatUnits(longOI, 30)),
-    short: parseFloat(formatUnits(shortOI, 30)),
-    total:
-      parseFloat(formatUnits(longOI, 30)) +
-      parseFloat(formatUnits(shortOI, 30)),
+    long: Number(formatUnits(longOI, 30)),
+    short: Number(formatUnits(shortOI, 30)),
+    total: Number(formatUnits(longOI + shortOI, 30)),
   };
 }
 
-/* --------------------------------------------------
-   SUBGRAPH ENDPOINTS
--------------------------------------------------- */
+/* ---------------- SUBGRAPHS ---------------- */
 const SUBGRAPHS = {
-  STATS: "https://api.goldsky.com/api/public/project_clhjdosm96z2v49wghcvog65t/subgraphs/project_clhjdosm96z2v4/moneyx-stats/gn",
-  RAW:   "https://api.goldsky.com/api/public/project_clhjdosm96z2v49wghcvog65t/subgraphs/moneyx-raw/v1.0.0/gn",
-  TRADES:"https://api.goldsky.com/api/public/project_clhjdosm96z2v49wghcvog65t/subgraphs/moneyx-trades/v1.0.1/gn",
+  STATS:
+    "https://api.goldsky.com/api/public/project_clhjdosm96z2v49wghcvog65t/subgraphs/project_clhjdosm96z2v4/moneyx-stats/gn",
+  RAW: "https://api.goldsky.com/api/public/project_clhjdosm96z2v49wghcvog65t/subgraphs/moneyx-raw/v1.0.0/gn",
+  TRADES:
+    "https://api.goldsky.com/api/public/project_clhjdosm96z2v49wghcvog65t/subgraphs/moneyx-trades/v1.0.1/gn",
 };
 
 async function gql(endpoint, query) {
@@ -112,64 +93,15 @@ async function gql(endpoint, query) {
   }
 }
 
-/* --------------------------------------------------
-   FIXED: REAL PER-MARKET 24H VOLUME
--------------------------------------------------- */
-async function getPerMarket24hVolume(token) {
-  const now = Math.floor(Date.now() / 1000);
-  const start = now - 24 * 3600;
-  const tokenLower = token.toLowerCase();
-
-  const q = `
-    {
-      volumesA: hourlyVolumeByTokens(
-        first: 500,
-        orderBy: timestamp,
-        orderDirection: desc,
-        where: { tokenA: "${tokenLower}", timestamp_gt: ${start} }
-      ) {
-        margin swap liquidation mint burn
-      }
-      volumesB: hourlyVolumeByTokens(
-        first: 500,
-        orderBy: timestamp,
-        orderDirection: desc,
-        where: { tokenB: "${tokenLower}", timestamp_gt: ${start} }
-      ) {
-        margin swap liquidation mint burn
-      }
-    }
-  `;
-
-  const d = await gql(SUBGRAPHS.STATS, q);
-  if (!d) return 0;
-
-  let total = 0;
-  const add = (r) => {
-    total += Number(r.margin || 0) / 1e30 +
-             Number(r.swap || 0) / 1e30 +
-             Number(r.liquidation || 0) / 1e30 +
-             Number(r.mint || 0) / 1e30 +
-             Number(r.burn || 0) / 1e30;
-  };
-
-  d.volumesA?.forEach(add);
-  d.volumesB?.forEach(add);
-
-  return Math.round(total * 100) / 100;
-}
-
-/* --------------------------------------------------
-   24H HIGH / LOW (PriceCandles)
--------------------------------------------------- */
+/* ---------------- HIGH / LOW FIXED ---------------- */
 async function getHighLow(token) {
   const now = Math.floor(Date.now() / 1000);
-  const start = now - 24 * 3600;
+  const start = now - 86400;
 
   const q = `
     {
       priceCandles(
-        first: 500,
+        first: 300,
         orderBy: timestamp,
         orderDirection: desc,
         where: { token: "${token.toLowerCase()}", timestamp_gt: ${start} }
@@ -183,15 +115,13 @@ async function getHighLow(token) {
   const d = await gql(SUBGRAPHS.STATS, q);
   if (!d?.priceCandles?.length) return { high: null, low: null };
 
-  const highs = d.priceCandles.map((c) => Number(c.high));
-  const lows = d.priceCandles.map((c) => Number(c.low));
+  const highs = d.priceCandles.map((c) => Number(formatUnits(c.high, 30)));
+  const lows = d.priceCandles.map((c) => Number(formatUnits(c.low, 30)));
 
   return { high: Math.max(...highs), low: Math.min(...lows) };
 }
 
-/* --------------------------------------------------
-   FUNDING RATE
--------------------------------------------------- */
+/* ---------------- FUNDING ---------------- */
 async function getFundingRate(token) {
   const q = `
     {
@@ -207,12 +137,49 @@ async function getFundingRate(token) {
   `;
   const d = await gql(SUBGRAPHS.STATS, q);
   if (!d?.fundingRates?.length) return 0;
-  return Number(d.fundingRates[0].endFundingRate) / 1e30;
+
+  return Number(formatUnits(d.fundingRates[0].endFundingRate, 30));
 }
 
-/* ==================================================
-   MAIN CMC/CG ENDPOINT — /contracts
-================================================== */
+/* ---------------- VOLUME FIXED ---------------- */
+async function getPerMarket24hVolume(token) {
+  const now = Math.floor(Date.now() / 1000);
+  const start = now - 86400;
+  const t = token.toLowerCase();
+
+  const q = `
+    {
+      volumesA: hourlyVolumeByTokens(
+        first: 500,
+        where: { tokenA: "${t}", timestamp_gt: ${start} }
+      ) { margin swap liquidation mint burn }
+      volumesB: hourlyVolumeByTokens(
+        first: 500,
+        where: { tokenB: "${t}", timestamp_gt: ${start} }
+      ) { margin swap liquidation mint burn }
+    }
+  `;
+
+  const d = await gql(SUBGRAPHS.STATS, q);
+  if (!d) return 0;
+
+  let total = 0;
+  const add = (r) => {
+    total +=
+      Number(formatUnits(r.margin || 0, 30)) +
+      Number(formatUnits(r.swap || 0, 30)) +
+      Number(formatUnits(r.liquidation || 0, 30)) +
+      Number(formatUnits(r.mint || 0, 30)) +
+      Number(formatUnits(r.burn || 0, 30));
+  };
+
+  d.volumesA?.forEach(add);
+  d.volumesB?.forEach(add);
+
+  return Math.round(total * 100) / 100;
+}
+
+/* ---------------- /contracts API ---------------- */
 app.get("/contracts", async (req, res) => {
   try {
     const now = Math.floor(Date.now() / 1000);
@@ -220,7 +187,7 @@ app.get("/contracts", async (req, res) => {
 
     for (const m of MARKETS) {
       const raw = await priceFeed.getPrimaryPrice(m.token, false);
-      const price = parseFloat(formatUnits(raw, 30));
+      const price = Number(formatUnits(raw, 30));
 
       const oi = await getOpenInterest(m.token);
       const hl = await getHighLow(m.token);
@@ -233,33 +200,15 @@ app.get("/contracts", async (req, res) => {
         ticker_id: m.id,
         base_currency: m.base,
         target_currency: "USD",
-
         last_price: price,
         base_volume: volume24h,
         target_volume: volume24h,
-
         bid: price - spread,
         ask: price + spread,
-
-        high: hl.high !== null ? hl.high : price * 1.01,
-        low: hl.low !== null ? hl.low : price * 0.99,
-
-        product_type: "perpetual",
-
+        high: hl.high ?? price,
+        low: hl.low ?? price,
         open_interest: oi.total,
-        open_interest_usd: oi.total,
-
-        index_price: price,
-        index_name: `${m.base}-USD Price Feed`,
-        index_currency: "USD",
-
         funding_rate: funding,
-        next_funding_rate: funding,
-        next_funding_rate_timestamp: now + 3600,
-
-        contract_type: "vanilla",
-        contract_price: price,
-        contract_price_currency: "USD",
       });
     }
 
@@ -270,53 +219,11 @@ app.get("/contracts", async (req, res) => {
   }
 });
 
-/* ==================================================
-   /contract_specs
-================================================== */
-app.get("/contract_specs", (req, res) => {
-  const out = {};
-  for (const m of MARKETS) {
-    out[m.id] = {
-      contract_type: "vanilla",
-      contract_price_currency: "USD",
-      contract_price: null,
-    };
-  }
-  res.json(safeJson(out));
-});
-
-/* ==================================================
-   PUBLIC HTML for CMC/CG
-================================================== */
-app.get("/contract-specs.html", (req, res) => {
-  res.sendFile(path.join(__dirname, "public/contract-specs.html"));
-});
-
-/* ==================================================
-   ORDERBOOK
-================================================== */
-app.get("/orderbook", async (req, res) => {
-  const id = req.query.ticker_id;
-  const m = MARKETS.find((x) => x.id === id);
-
-  if (!m) return res.status(400).json({ error: "Unknown ticker_id" });
-
-  const raw = await priceFeed.getPrimaryPrice(m.token, false);
-  const price = parseFloat(formatUnits(raw, 30));
-
-  const { bids, asks } = makeOrderbook(price);
-
-  res.json(safeJson({ ticker_id: id, timestamp: Date.now(), bids, asks }));
-});
-
-/* ==================================================
-   MONEY SUPPLY
-================================================== */
+/* ---------------- Supply ---------------- */
 app.get("/supply/money", async (req, res) => {
   try {
     const total = await money.totalSupply();
     const decimals = await money.decimals();
-
     res.json(
       safeJson({
         total_supply: total.toString(),
@@ -329,16 +236,12 @@ app.get("/supply/money", async (req, res) => {
   }
 });
 
-/* ==================================================
-   HEALTHCHECK
-================================================== */
+/* ---------------- Healthcheck ---------------- */
 app.get("/", (req, res) => {
-  res.json(safeJson({ status: "ok", name: "MoneyX CG/CMC API", timestamp: Date.now() }));
+  res.json({ status: "ok", name: "MoneyX API", t: Date.now() });
 });
 
-/* ==================================================
-   START SERVER
-================================================== */
+/* ---------------- Start ---------------- */
 app.listen(PORT, () =>
-  console.log(`🔥 MoneyX Market Data API running on port ${PORT} – VOLUME NOW REAL FROM STATS`)
+  console.log(`🔥 MoneyX Market Data API running on ${PORT}`)
 );
