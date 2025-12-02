@@ -1,5 +1,5 @@
 import express from "express";
-import { ethers } from "ethers";
+import { ethers, formatUnits } from "ethers";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -80,9 +80,11 @@ async function getOpenInterest(token) {
   const shortOI = await vault.globalShortSizes(token);
 
   return {
-    long: Number(longOI) / 1e30,
-    short: Number(shortOI) / 1e30,
-    total: (Number(longOI) + Number(shortOI)) / 1e30,
+    long: parseFloat(formatUnits(longOI, 30)),
+    short: parseFloat(formatUnits(shortOI, 30)),
+    total:
+      parseFloat(formatUnits(longOI, 30)) +
+      parseFloat(formatUnits(shortOI, 30)),
   };
 }
 
@@ -111,7 +113,7 @@ async function gql(endpoint, query) {
 }
 
 /* --------------------------------------------------
-   FIXED: REAL PER-MARKET 24H VOLUME (tokenA OR tokenB) — NOW USES STATS SUBGRAPH
+   FIXED: REAL PER-MARKET 24H VOLUME
 -------------------------------------------------- */
 async function getPerMarket24hVolume(token) {
   const now = Math.floor(Date.now() / 1000);
@@ -139,7 +141,7 @@ async function getPerMarket24hVolume(token) {
     }
   `;
 
-  const d = await gql(SUBGRAPHS.STATS, q);  // ← FIXED: Use STATS (where data exists)
+  const d = await gql(SUBGRAPHS.STATS, q);
   if (!d) return 0;
 
   let total = 0;
@@ -158,7 +160,7 @@ async function getPerMarket24hVolume(token) {
 }
 
 /* --------------------------------------------------
-   24H HIGH / LOW (from PriceCandles)
+   24H HIGH / LOW (PriceCandles)
 -------------------------------------------------- */
 async function getHighLow(token) {
   const now = Math.floor(Date.now() / 1000);
@@ -188,7 +190,7 @@ async function getHighLow(token) {
 }
 
 /* --------------------------------------------------
-   FUNDING RATE (from subgraph)
+   FUNDING RATE
 -------------------------------------------------- */
 async function getFundingRate(token) {
   const q = `
@@ -205,7 +207,6 @@ async function getFundingRate(token) {
   `;
   const d = await gql(SUBGRAPHS.STATS, q);
   if (!d?.fundingRates?.length) return 0;
-
   return Number(d.fundingRates[0].endFundingRate) / 1e30;
 }
 
@@ -219,14 +220,14 @@ app.get("/contracts", async (req, res) => {
 
     for (const m of MARKETS) {
       const raw = await priceFeed.getPrimaryPrice(m.token, false);
-      const price = Number(raw) / 1e30;
+      const price = parseFloat(formatUnits(raw, 30));
 
       const oi = await getOpenInterest(m.token);
       const hl = await getHighLow(m.token);
       const funding = await getFundingRate(m.token);
-      const volume24h = await getPerMarket24hVolume(m.token);  // ← NOW RETURNS REAL VOLUME
+      const volume24h = await getPerMarket24hVolume(m.token);
 
-      const spread = price * 0.001; // 0.1% spread, CG-approved
+      const spread = price * 0.001;
 
       out.push({
         ticker_id: m.id,
@@ -240,8 +241,8 @@ app.get("/contracts", async (req, res) => {
         bid: price - spread,
         ask: price + spread,
 
-        high: hl.high ?? price * 1.01,
-        low: hl.low ?? price * 0.99,
+        high: hl.high !== null ? hl.high : price * 1.01,
+        low: hl.low !== null ? hl.low : price * 0.99,
 
         product_type: "perpetual",
 
@@ -301,7 +302,7 @@ app.get("/orderbook", async (req, res) => {
   if (!m) return res.status(400).json({ error: "Unknown ticker_id" });
 
   const raw = await priceFeed.getPrimaryPrice(m.token, false);
-  const price = Number(raw) / 1e30;
+  const price = parseFloat(formatUnits(raw, 30));
 
   const { bids, asks } = makeOrderbook(price);
 
